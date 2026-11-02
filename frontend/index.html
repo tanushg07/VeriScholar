@@ -1,0 +1,63 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Research Paper Generator</title>
+<style>
+:root{--bg:#eef1ec;--panel:#fbfcfa;--ink:#1b2a2a;--mut:#5c6b69;--line:#cfd7d2;--acc:#0f5c6e;--ok:#2e7d4f;--warn:#a86a12;--bad:#b23a48}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink);display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+aside{background:var(--ink);color:#e7efec;padding:22px;position:sticky;top:0;height:100vh;overflow:auto}aside h1{font:600 20px Georgia,serif;margin:0 0 16px}
+label{display:block;font-size:13px;margin:12px 0 4px;color:#b9c8c4}input,textarea,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:4px;font:inherit;background:#fff;color:var(--ink)}
+textarea{min-height:90px}button{background:var(--acc);color:#fff;border:0;border-radius:4px;padding:8px 14px;font:inherit;cursor:pointer}button.alt{background:transparent;color:var(--acc);border:1px solid var(--acc)}button:disabled{opacity:.5;cursor:default}
+aside button{width:100%;margin-top:16px;background:#e8b64c;color:#1b2a2a;font-weight:600}main{padding:24px;max-width:1100px}
+.stages{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.st{background:var(--panel);border:1px solid var(--line);padding:10px;border-radius:4px}.st b{display:block;font-size:13px}.bar{height:6px;background:var(--line);margin:6px 0}.bar i{display:block;height:100%;background:var(--acc)}.st small{color:var(--mut);font-size:12px}.st.error .bar i{background:var(--bad)}
+nav{display:flex;gap:4px;margin:20px 0 12px;border-bottom:1px solid var(--line)}nav button{background:none;color:var(--mut);border-radius:0;border-bottom:3px solid transparent}nav button.on{color:var(--ink);border-color:var(--acc);font-weight:600}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px;margin-bottom:12px}table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;font-size:14px}
+.chip{padding:2px 8px;border-radius:10px;font-size:12px;color:#fff;white-space:nowrap}.VERIFIED{background:var(--ok)}.PARTIALLY{background:var(--warn)}.UNVERIFIED{background:var(--bad)}
+.sec p{font:16px/1.7 Georgia,serif;max-width:75ch;text-align:justify}.mut{color:var(--mut)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.high{color:var(--bad)}.medium{color:var(--warn)}
+@media(max-width:800px){body{grid-template-columns:1fr}aside{position:static;height:auto}.stages{grid-template-columns:1fr 1fr}}
+</style></head><body>
+<aside><h1>Research Paper Generator</h1>
+<label>Paper title</label><input id=title>
+<label>Section headings (one per line)</label><textarea id=secs></textarea>
+<label>Citation style</label><select id=style><option>IEEE</option><option>APA</option></select>
+<label>Number of papers (25–30)</label><input id=n type=number min=25 max=30 value=25>
+<label>Instructions (optional)</label><textarea id=instr></textarea>
+<button id=go>Start research</button></aside>
+<main><div class=stages id=stages></div>
+<nav id=tabs></nav><div id=view><p class=mut>Enter a title and section headings, then start research. Papers are searched, then verified against Crossref before you review them.</p></div></main>
+<script>
+let J=null,tab='Papers',id=localStorage.rpg,busyExport=false;const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,o={}){const r=await fetch('/api'+p,o);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||r.statusText);return d}
+const post=(p,b)=>api(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+$('#go').onclick=async()=>{try{const r=await post('/jobs',{title:$('#title').value,sections:$('#secs').value.split('\n'),style:$('#style').value,n:+$('#n').value,instructions:$('#instr').value});if(!r.id){alert('Server did not return a job ID');return;}id=localStorage.rpg=r.id;J=null;tab='Papers'}catch(e){alert(e.message)}};
+async function poll(){if(id){try{const prev=J&&J.stages.generation.status;J=await api('/jobs/'+id);if(prev!='done'&&J.stages.generation.status=='done'&&tab=='Papers')tab='Paper';draw()}catch(e){if(e.message&&e.message.includes('404')){id=localStorage.rpg='';J=null;}}}setTimeout(poll,1800)}
+const chip=s=>`<span class="chip ${s.split(' ')[0]}">${s}</span>`;
+function draw(){
+ $('#stages').innerHTML=Object.entries(J.stages).map(([k,v])=>`<div class="st ${v.status}"><b>${k[0].toUpperCase()+k.slice(1)}</b><div class=bar><i style="width:${v.pct}%"></i></div><small>${esc(v.msg||v.status)}</small></div>`).join('');
+ $('#tabs').innerHTML=['Papers','Paper','Upload','Citations','Export'].map(t=>`<button class="${t==tab?'on':''}" onclick="tab='${t}';draw()">${t}</button>`).join('');
+ if(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName)&&document.activeElement.closest('#view'))return;
+ $('#view').innerHTML=({Papers,Paper,Upload,Citations,Export})[tab]()}
+function Papers(){const genDone=J.stages.generation.status=='done',busy=J.stages.generation.status=='running'||J.stages.analysis.status=='running'||J.stages.discovery.status=='running'||J.stages.verification.status=='running';
+ const pipeline=J.stages.discovery.status!='idle'&&!genDone&&!busy?`<p class=mut>⏳ Pipeline running automatically…</p>`:'';
+ const regenBtn=genDone?`<button ${busy?'disabled':''} onclick="if(!id)return;post('/jobs/'+id+'/generate').then(()=>tab='Paper')">↺ Regenerate paper</button>`:'';
+ return `<div class=card><div class=row>${regenBtn}
+ <input id=doi placeholder="Add a paper by DOI" style="width:260px"><button class=alt onclick="addDoi()">Add</button></div>
+ ${pipeline}
+ <p class=mut>Only VERIFIED papers are cited. Remove papers you don't want. Fewer than requested means fewer genuinely verifiable relevant papers were found; none are invented.</p></div>
+ <div class=card><table><tr><th>Status<th>Paper<th>Rel.<th></tr>${J.papers.map(p=>`<tr><td>${chip(p.status)}<td><b>${esc(p.title)}</b><br><span class=mut>${esc(p.authors.slice(0,3).join(', '))} · ${p.year} · ${esc(p.venue)}</span><br>${p.doi?`<a href="https://doi.org/${p.doi}" target=_blank>doi:${p.doi}</a>`:''} <span class=mut>${esc((p.evidence.checks||[]).join(' · '))}</span><td>${p.relevance??'–'}<td><button class=alt onclick="del('${p.key}')">Remove</button></tr>`).join('')}</table>
+ ${J.excluded.length?`<p class=mut>${J.excluded.length} candidates excluded as unverifiable (see Research_Discovery_Report.pdf).</p>`:''}</div>`}
+async function del(k){await api(`/jobs/${id}/papers/${k}`,{method:'DELETE'})}
+async function addDoi(){try{await post(`/jobs/${id}/papers`,{doi:$('#doi').value})}catch(e){alert(e.message)}}
+function Paper(){if(!J.order.length)return '<p class=mut>No paper yet. Review papers, then generate.</p>';
+ return J.order.map(s=>J.rendered[s]?`<div class="card sec"><div class=row><h3 style="flex:1;font-family:Georgia">${esc(s)}</h3><button class=alt onclick="post('/jobs/'+id+'/sections/'+encodeURIComponent('${s.replace(/'/g,"\\'")}')+'/regenerate')">Regenerate</button></div>${J.rendered[s].split('\n\n').map(p=>`<p>${esc(p)}</p>`).join('')}</div>`:'').join('')+`<div class="card"><h3>References</h3>${J.reflist.map(r=>`<p class=mut>${esc(r)}</p>`).join('')}</div>`}
+function Upload(){const x=J.ixc||{};return `<div class=card><p>Upload your finished paper (PDF or DOCX). The abstract, introduction and conclusion are written only from what it contains, and its citations are checked.</p><input type=file id=f accept=".pdf,.docx"><br><br><button onclick="up()">Upload and analyse</button> <span class=mut>${J.upload?esc(J.upload.filename):''}</span></div>`+
+ ['abstract','introduction','conclusion'].map(k=>x[k]?`<div class="card sec"><h3 style="font-family:Georgia">${k[0].toUpperCase()+k.slice(1)}</h3>${x[k].split('\n').map(p=>`<p>${esc(p)}</p>`).join('')}</div>`:'').join('')+(x.source?`<p class=mut>Source: ${esc(x.source)}</p>`:'')}
+async function up(){const f=$('#f').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);try{await api(`/jobs/${id}/upload`,{method:'POST',body:fd});tab='Citations'}catch(e){alert(e.message)}}
+function issues(I){return I&&I.length?`<table>${I.map(i=>`<tr><td class="${i.severity}">${i.severity||''}<td>${esc(i.type)}<td>${esc(i.section||'')}<td>${esc(i.detail)}</tr>`).join('')}</table>`:'<p class=mut>No issues detected.</p>'}
+function Citations(){const g=J.gen_check,u=J.upload_check,q=J.qa;
+ return `<div class=card><h3>Generated paper</h3>${g?`<p>${g.total_citations} citations · ${g.issues.length} issues</p>`+issues(g.issues):'<p class=mut>Not generated yet.</p>'}</div>
+ <div class=card><h3>Uploaded paper ${u&&u.style?`(${u.style}, ${u.n_refs} references)`:''}</h3>${u?issues(u.issues):'<p class=mut>No upload yet.</p>'}</div>
+ <div class=card><h3>Quality report</h3>${q?`<p class=mut>${esc(q.note)}</p>`+issues(q.issues):'<p class=mut>Runs after generation.</p>'}</div>`}
+function Export(){return `<div class=card><button onclick="doExport(this)">Build files</button> <span id=ex class=mut></span><div id=dl class=row style="margin-top:12px"></div></div>`}
+async function doExport(b){b.disabled=true;$('#ex').textContent='Building…';try{const r=await post(`/jobs/${id}/export`);$('#ex').textContent='';
+ $('#dl').innerHTML=`<a href="/api/jobs/${id}/file/Research_Package.zip"><button>Download ZIP</button></a>`+r.files.filter(f=>/\.(docx|pdf)$/.test(f)).map(f=>`<a href="/api/jobs/${id}/file/${f}">${f}</a>`).join(' · ')}catch(e){$('#ex').textContent=e.message}b.disabled=false}
+poll();
+</script></body></html>
